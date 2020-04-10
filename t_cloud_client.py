@@ -1,14 +1,17 @@
 from tornado.httpclient import AsyncHTTPClient
 from config import *
+from pathlib import Path
 import asyncio
 import json
 import uuid
+import requests
 
 
 class StreamerClient:
     def __init__(self):
-        self.entry_point = streamer_entry_point
-        self.headers = {'accept':'application/json',
+        self._token=None
+        self._entry_point = streamer_entry_point
+        self._headers = {'accept':'application/json',
                         'Authorization': None,
                         'Content-Type': 'application/json'}
         self.http_client = AsyncHTTPClient()
@@ -39,8 +42,8 @@ class StreamerClient:
                                             body=body,
                                             headers=headers)
             if response.error is None:
-                token = f"Bearer {json.loads(response.body)['msg']['v3']['access_token']}"
-                self.headers['Authorization'] = token
+                self._token = f"Bearer {json.loads(response.body)['msg']['v3']['access_token']}"
+                self._headers['Authorization'] = self._token
                 print(f'Getting token successful.')
             else:
                 print(f'Getting token failed.')
@@ -55,19 +58,22 @@ class StreamerClient:
                 return await fetch()
         return response
     
-    async def _get_cams(self, device_id)-> list:
+    async def _get_cams(self, device_id):
         """List cameras by device_id."""
 
-        api_endpoint = f'{self.entry_point}{device_id}/cams?bypass_status_check=false'
+        api_endpoint = f'{self._entry_point}{device_id}/cams?bypass_status_check=false'
        
         async def fetch():
             return await self.http_client.fetch(api_endpoint,
                                             raise_error=False,
                                             method='GET',
-                                            headers=self.headers)
+                                            headers=self._headers)
         return await self._auth_promise_fetch(fetch)
 
-    async def get_driver_cam_id(self, device_id, cam_name):
+    async def get_cam_id(self, device_id, cam_name):
+        """Get the camera by the given device and camera name"""
+        
+        
         response = await self._get_cams(device_id)
         cams = self._get_msg(response)
         if not cams:
@@ -79,16 +85,32 @@ class StreamerClient:
             print('Can not find any camera by the given camera name')
             return
         return match_cams[0]['cam_uid']
+           
+    def download_video(self, cam_id, device_id, start, duration, filename):
+        """Download video to current folder.
         
-    async def down_video(self, device_id, cam_id, start, duration)->str:
-        response = await self.client.post_route(self.test_name)
-        id = self.get_msg(response)['id']
-        return id
-    
-    
-async def main():
-    client = StreamerClient()
-    cam_id = await client.get_driver_cam_id(device_id, driver_cam_name)
-    print(cam_id)
-    
-asyncio.run(main())
+        :param start: timestamp string eg.'1586495803'.
+        :param duration: unit is second and type is int.
+        :param filename: the name gonna be saved.
+        """
+        
+        
+        try:
+            print('Video downloading...')
+            
+            url = f'{self._entry_point}{device_id}/cams/{cam_id}/clip?pos={start}&duration={duration}&profile=-1'
+            with requests.get(url, stream=True, headers=self._headers) as r:
+                r.raise_for_status()
+                with open(filename, 'wb') as f:
+                    for chunk in r.iter_content(chunk_size=8192): 
+                        if chunk: # filter out keep-alive new chunks
+                            f.write(chunk)
+                            # f.flush()
+            
+            print('done')
+        except Exception as e:
+            print(e)
+
+
+
+
