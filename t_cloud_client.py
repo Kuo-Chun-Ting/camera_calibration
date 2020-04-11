@@ -8,16 +8,18 @@ import requests
 import json
 import hashlib
 import pathlib
+import time
 
 
 class TCloudClient:
     def __init__(self, entrypoint, user=None):
-        self._token = None
+        self._user_token = None
+        self._device_token = None
         self._user = user
         self._entrypoint = entrypoint
         self._headers = {'accept':'application/json',
-                        'Authorization': None,
-                        'Content-Type': 'application/json'}
+                        'Authorization':None,
+                        'Content-Type':'application/json'}
         self._http_client = AsyncHTTPClient()
 
     def _get_msg(self, response):
@@ -28,8 +30,15 @@ class TCloudClient:
             print(f'{method} {url} {code}')
             return json.loads(response.body)['msg']
         print(f'{method} {url} {code}')
-    
-    async def _get_token(self):
+
+    def _get_digest(self, device_id, uid, serial, ts):
+        data = f'{device_id}{uid}{serial}{ts}'.encode('utf-8')
+        i = hashlib.sha1()
+        i.update(data)
+        h = i.hexdigest()
+        return h
+       
+    async def _get_user_token(self):
         """Get the access token from Alpha."""
 
         try:
@@ -46,8 +55,43 @@ class TCloudClient:
                                             body=body,
                                             headers=headers)
             if response.error is None:
-                self._token = f"Bearer {json.loads(response.body)['msg']['v3']['access_token']}"
-                self._headers['Authorization'] = self._token
+                self._user_token = f"Bearer {json.loads(response.body)['msg']['v3']['access_token']}"
+                self._headers['Authorization'] = self._user_token
+                print(f'Getting token successful.')
+            else:
+                print(f'Getting token failed.')
+
+        except Exception as e:
+            print(f'An error occurred while getting token {e}')
+
+    async def _get_device_token(self, device_id):
+        """Get the access token from Alpha."""
+
+        try:
+            url = f'{self._entrypoint}auth/device/token'
+            headers = {'Accept': 'application/json',
+                        'Content-Type': 'application/json'}
+            
+            uid = str(uuid.uuid4())
+            last_six = device_id[-6:]
+            serial = '0P-69-00-{}-{}-{}'.format(last_six[-6:-4],last_six[-4:-2],last_six[-2:]).upper()
+            ts = int(time.time())
+            digest = self._get_digest(device_id, uid, serial, ts)
+            body = json.dumps({
+                "auth_digest": digest,
+                "serial_number": serial,
+                "timestamp": ts,
+                "uuid": uid
+                })
+            
+            response = await self._http_client.fetch(url,
+                                            raise_error=True,
+                                            method='POST',
+                                            body=body,
+                                            headers=headers)
+            if response.error is None:
+                self._device_token = f"Bearer {json.loads(response.body)['msg']['v3']['access_token']}"
+                self._headers['Authorization'] = self._device_token
                 print(f'Getting token successful.')
             else:
                 print(f'Getting token failed.')
@@ -58,46 +102,10 @@ class TCloudClient:
     async def _auth_promise_fetch(self, fetch):
         response = await fetch()
         if response.code in (401, 599):
-                await self._get_token()
+                await self._get_user_token()
                 return await fetch()
         return response
-    
-    async def _get_device_token(self, _device_id):
-        """Get the access token from Alpha."""
-
-        try:
-            url = f'{self._entrypoint}auth/device/token'
-
-            # data = 'e42c56dbfdb7dbc34ded-f25d-488d-bf68-e822b4f6dd2a0P-69-00-DB-FD-B71586507721'.encode('utf-8')
-            # s = hashlib.sha1()
-            # s.update(data)
-            # h = s.hexdigest()
-            # print(h)
-            
-            body = json.dumps({
-                "auth_digest": "b249445fa3cdfccaf48ed270075b805d2d9c7ecc",
-                "serial_number": "0P-69-00-DB-FD-B7",
-                "timestamp": 1586507721,
-                "uuid": "dbc34ded-f25d-488d-bf68-e822b4f6dd2a"
-                })
-            
-            headers = {k: v for k, v in self._headers.items() if v is not None}
-
-            response = await self._http_client.fetch(url,
-                                            raise_error=True,
-                                            method='POST',
-                                            body=body,
-                                            headers=headers)
-            if response.error is None:
-                self._token = f"Bearer {json.loads(response.body)['msg']['v3']['access_token']}"
-                self._headers['Authorization'] = self._token
-                print(f'Getting token successful.')
-            else:
-                print(f'Getting token failed.')
-
-        except Exception as e:
-            print(f'An error occurred while getting token {e}')
-
+        
     async def _device_auth_promise_fetch(self, device_id, fetch):
         response = await fetch()
         if response.code in (401, 599):
@@ -196,9 +204,10 @@ class TCloudClient:
         
         response = await self._patch_setting(device_id, filename)
         if not response.error:
+            print('Upload config successful.')
             return True
         else:
-            print(f'{response.error}')
+            print(f'Upload config failed. {response.error}')
             return False
 
 
