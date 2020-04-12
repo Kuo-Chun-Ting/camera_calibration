@@ -10,7 +10,7 @@ import hashlib
 import time
 
 
-class TCloudClient:
+class BugattiClient:
     def __init__(self, entrypoint, user=None):
         self._user_token = ''
         self._device_token = ''
@@ -19,7 +19,7 @@ class TCloudClient:
         self._http_client = AsyncHTTPClient()
        
     async def _get_user_token(self):
-        """Get the access token from Alpha."""
+        """Get the user token from auth API."""
 
         try:
             url = f'{self._entrypoint}auth/token'
@@ -38,12 +38,11 @@ class TCloudClient:
                 print(f'Getting user token successful.')
             else:
                 print(f'Getting user token failed.\n{response.error}')
-
         except Exception as e:
             print(f'An exceptional error occurred while getting user toke. {e}')
 
     async def _get_device_token(self, device_id):
-        """Get the access token from Alpha."""
+        """Get the device token from auth API."""
 
         try:
             url = f'{self._entrypoint}auth/device/token'
@@ -73,11 +72,12 @@ class TCloudClient:
                 print(f'Getting device token successful.')
             else:
                 print(f'Getting device token failed.\n{response.error}')
-
         except Exception as e:
             print(f'An exceptional error occurred while getting device token. {e}')
-
+    
     def _get_digest(self, device_id, uid, serial, ts):
+        """Get digest for the device auth"""
+        
         data = f'{device_id}{uid}{serial}{ts}'.encode('utf-8')
         i = hashlib.sha1()
         i.update(data)
@@ -85,7 +85,8 @@ class TCloudClient:
         return h
                
     async def _get_cams(self, device_id):
-        """List cameras by device_id."""
+        """Get camera list by specified device from streamer API"""
+        
         try:
             url = f'{self._entrypoint}streamer/{device_id}/cams?bypass_status_check=false'
             headers = {'Authorization':self._user_token,
@@ -106,7 +107,7 @@ class TCloudClient:
             print(f'An error occurred while getting camera list. {e}')
 
     async def _get_cam_id(self, device_id, cam_name):
-        """Get the camera by the given device and camera name"""
+        """Filter out the specified camera id by camera name."""
         
         cams = await self._get_cams(device_id)
         if not cams:
@@ -125,6 +126,8 @@ class TCloudClient:
             return cam_id
 
     def _get_cam_clip(self, cam_id, device_id, start, duration, filename):
+        """Download camera clip of the specified interval from streamer API."""
+        
         try:
             url = f'{self._entrypoint}streamer/{device_id}/cams/{cam_id}/clip?pos={start}&duration={duration}&profile=-1'
             headers = {'Authorization':self._user_token,
@@ -144,7 +147,7 @@ class TCloudClient:
             print('Video downloading failed.')
 
     async def _patch_setting(self,device_id, filename):
-        """Upliad the config of the wheel calibration"""
+        """Upload the calibration config to setting API."""
         
         try:
             url = f'{self._entrypoint}event_resource/setting'
@@ -193,7 +196,10 @@ class TCloudClient:
             print(e)
  
     async def upload_config(self, device_id, filename):
-        """Upliad the config of the wheel calibration."""
+        """Upliad the calibration config.
+        
+        :param filename: the filename of the config file.
+        """
         
         try:
             if not Path(filename).is_file():
